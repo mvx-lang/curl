@@ -24,27 +24,14 @@ jobs:
           title: curl
           body: "HTTP client for UniData via curl (HTTPGET, HTTPGETFILE). Source + udt seam; indexed by the package registry."
 
+  # The udt side is a native CallC binding (mvxcurl.c -DMVXCURL_UDT -> curlcallcb.o,
+  # linked against libcurl into libu2callc.so), so the object must be compiled on
+  # the target's Rocky 8 — build it in the licensed udt-builder container (which
+  # ships libcurl-devel) via the shared udt-build action, exactly like git.
   udt-binary:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, udt]
     steps:
       - uses: actions/checkout@v5
-      - name: Stage the udt seam
-        id: pkg
-        shell: bash
-        run: |
-          set -euo pipefail
-          VER="${GITHUB_REF_NAME}"
-          BASE="mvx-lang_curl-$VER-udt-any-any-le"
-          rm -rf dist && mkdir -p dist
-          sh build-udt.sh dist                  # stages dist/BP + manifest (contents-at-root)
-          tar czf "$BASE.tar.gz" -C dist .
-          sha256sum "$BASE.tar.gz" > "$BASE.tar.gz.sha256"
-          echo "tarball=$BASE.tar.gz" >> "$GITHUB_OUTPUT"
-          echo "checksum=$BASE.tar.gz.sha256" >> "$GITHUB_OUTPUT"
-      - uses: softprops/action-gh-release@v3
+      - uses: mvx-lang/mv-package-registry/.github/actions/udt-build@main
         with:
-          tag_name: ${{ github.ref_name }}
-          files: |
-            ${{ steps.pkg.outputs.tarball }}
-            ${{ steps.pkg.outputs.checksum }}
-          fail_on_unmatched_files: true
+          package: mvx-lang/curl

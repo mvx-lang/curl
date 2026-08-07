@@ -1,9 +1,9 @@
 {
   "name": "mvx-lang/curl",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "HTTP client for UniData via curl (HTTPGET, HTTPGETFILE) — the udt HTTP seam",
   "license": "GPL-2.0-only",
-  "systems": ["udt"],
+  "systems": ["mvx", "udt"],
   "provides": ["http"],
   "dependencies": [],
   "deploy": {}

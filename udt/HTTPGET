@@ -1,12 +1,7 @@
 FUNCTION HTTPGET(URL)
-* mvx-lang/curl — HTTP GET via curl, returning the response body.  UniData's
-* native HTTPS (createSecureRequest) does not reliably reach github or follow
-* redirects, so the curl package provides the HTTP seam the udt package manager
-* relies on.  curl is a stated prerequisite (mvpkg's install.sh preflights it).
-* GPL-2.0-only.
-   TMP = "/tmp/mvpkg_get.tmp"
-   EXECUTE '!curl -sL "' : URL : '" > ' : TMP
-   BODY = ""
-   OSREAD BODY FROM TMP ELSE BODY = ""
-   EXECUTE '!rm -f ' : TMP
-   RETURN BODY
+* mvx-lang/curl — HTTP GET via libcurl through CallC (CURLGET), returning the
+* response body on a 2xx status ("" otherwise).  libcurl handles TLS, redirects
+* and binary bodies.  Needs the CallC library (libu2callc.so) built with the
+* curl contribution (udt-callc-build folds in curlcallcb.o).  GPL-2.0-only.
+   PERFORM "UDT.OPTIONS 88 ON"        ;* enable CallC
+   RETURN CALLC CURLGET(URL)

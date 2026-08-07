@@ -1,0 +1,2 @@
+CURLGET:string:1:string
+CURLGETFILE:string:2:string,string
