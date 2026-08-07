@@ -1,0 +1,12 @@
+FUNCTION HTTPGET(URL)
+* mvx-lang/curl — HTTP GET via curl, returning the response body.  UniData's
+* native HTTPS (createSecureRequest) does not reliably reach github or follow
+* redirects, so the curl package provides the HTTP seam the udt package manager
+* relies on.  curl is a stated prerequisite (mvpkg's install.sh preflights it).
+* GPL-2.0-only.
+   TMP = "/tmp/mvpkg_get.tmp"
+   EXECUTE '!curl -sL "' : URL : '" > ' : TMP
+   BODY = ""
+   OSREAD BODY FROM TMP ELSE BODY = ""
+   EXECUTE '!rm -f ' : TMP
+   RETURN BODY

@@ -1,0 +1,50 @@
+# Release curl on a version tag: a portable source package plus the udt BASIC
+# HTTP seam (HTTPGET/HTTPGETFILE via curl).  udt-only, pure BASIC — no native
+# build, no container — so it stages + tars on a hosted runner and is
+# os/arch-independent (udt-any-any-le).  Copyright (C) 2026 Gordon Heydon.
+# GPL-2.0-only.  Tag the bare version, e.g.:  git tag 1.0.0 && git push origin 1.0.0
+name: release
+
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+*"
+
+permissions:
+  contents: write
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: mvx-lang/mvx/.github/actions/publish-source@main
+        with:
+          package: mvx-lang/curl
+          title: curl
+          body: "HTTP client for UniData via curl (HTTPGET, HTTPGETFILE). Source + udt seam; indexed by the package registry."
+
+  udt-binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Stage the udt seam
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME}"
+          BASE="mvx-lang_curl-$VER-udt-any-any-le"
+          rm -rf dist && mkdir -p dist
+          sh build-udt.sh dist                  # stages dist/BP + manifest (contents-at-root)
+          tar czf "$BASE.tar.gz" -C dist .
+          sha256sum "$BASE.tar.gz" > "$BASE.tar.gz.sha256"
+          echo "tarball=$BASE.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=$BASE.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ${{ steps.pkg.outputs.tarball }}
+            ${{ steps.pkg.outputs.checksum }}
+          fail_on_unmatched_files: true
