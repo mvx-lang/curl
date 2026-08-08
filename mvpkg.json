@@ -4,7 +4,7 @@
   "description": "In-process HTTP for UniData via libcurl/CallC (HTTPGET, HTTPGETFILE) — the faster alternative to curl-cmd; needs gcc + the OS libcurl at install",
   "license": "GPL-2.0-only",
   "systems": ["udt"],
-  "provides": [],
+  "provides": ["curl"],
   "dependencies": [],
   "deploy": {}
 }
