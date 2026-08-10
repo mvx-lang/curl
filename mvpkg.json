@@ -6,5 +6,6 @@
   "systems": ["udt"],
   "provides": ["curl"],
   "dependencies": [],
+  "clibs": ["libcurl.so.4"],
   "deploy": {}
 }
