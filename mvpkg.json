@@ -1,11 +1,20 @@
 {
   "name": "mvx-lang/curl",
   "version": "1.1.0",
-  "description": "In-process HTTP for UniData via libcurl/CallC (HTTPGET, HTTPGETFILE) — the faster alternative to curl-cmd; needs gcc + the OS libcurl at install",
+  "description": "In-process HTTP for UniData via libcurl/CallC (HTTPGET, HTTPGETFILE) \u2014 the faster alternative to curl-cmd; needs gcc + the OS libcurl at install",
   "license": "GPL-2.0-only",
-  "systems": ["udt"],
-  "provides": ["curl"],
+  "systems": [
+    "udt"
+  ],
+  "provides": [
+    "curl"
+  ],
   "dependencies": [],
-  "clibs": ["libcurl.so.4"],
+  "devDependencies": [
+    "mvx-lang/mvpkg"
+  ],
+  "clibs": [
+    "libcurl.so.4"
+  ],
   "deploy": {}
 }
