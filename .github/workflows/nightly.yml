@@ -1,0 +1,91 @@
+# curl — nightly dev build.
+# Copyright (C) 2026 Gordon Heydon.  GPL-2.0-only (see LICENSE).
+#
+# A dev build of DEVELOP, once a night, and only when there is something new to
+# build.
+#
+# It does not build anything itself.  It decides, and then moves ONE tag -- and
+# that tag is what release.yml already builds from, so a dev build is the same
+# artifacts produced by the same steps as a release.  A dev build assembled by a
+# second, slightly different pipeline would be testing that pipeline rather than
+# the product.
+#
+# ONE TAG, NOT ONE A NIGHT.  `dev` is moved to develop's HEAD, so there is never
+# more than one dev tag and the release keeps its identity: the same URL, the
+# same asset names, updated in place.  Dated tags would say the same thing at the
+# cost of a new tag and a new release every night, for ever.
+#
+# WHICH ALSO MAKES "has anything changed" EXACT.  The tag's current target IS the
+# last hash that was built -- not a note about it that can drift out of step with
+# what was actually published.  A nightly that rebuilds the same commit every
+# night teaches everyone to ignore it, and buries the night something did change.
+#
+# WHAT THIS ONE DOES NOT CHECK.  mvx and mv_git ask CI whether the commit is
+# green before tagging it, and refuse to build a red one.  This repository has no
+# CI, so there is nothing to ask: `dev` here means "the latest develop, built",
+# NOT "the latest develop, tested".  The build still has to succeed for anything
+# to publish, so a dev release means the package assembles -- it does not mean it
+# works.  Add a ci.yml and this workflow should grow the same gate.
+name: nightly
+
+on:
+  schedule:
+    # 16:00 UTC — early morning in Australia/Sydney, so a night's work is
+    # waiting rather than landing mid-afternoon.
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write     # to move the dev tag
+  # WRITE, not read.  DISPATCHING release.yml on the tag needs write, and
+  # without it the tag lands and the dispatch is refused with "403: Resource not
+  # accessible by integration" -- leaving exactly the symptom this workflow
+  # exists to avoid, a dev tag with no build against it.
+  actions: write
+
+jobs:
+  decide:
+    name: anything new?
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: develop
+          fetch-depth: 0        # tags, and enough history to compare
+
+      - name: Tag develop if it has moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          echo "develop is at $SHA"
+
+          LAST="$(git rev-parse -q --verify 'refs/tags/dev^{commit}' || true)"
+          if [ -n "$LAST" ]; then
+            echo "last dev build was $LAST"
+          else
+            echo "no dev tag yet — this is the first dev build"
+          fi
+          if [ "$LAST" = "$SHA" ]; then
+            echo "nothing new since the last dev build — stopping."
+            exit 0
+          fi
+
+          # -f and --force, because the whole point is that `dev` MOVES.  An
+          # annotated tag carries the date and the commit it was made from, so
+          # what a given dev build was is still answerable after the tag has
+          # moved on -- by the release, which keeps its own record.
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              tag -f -a dev -m "nightly dev build of develop at $SHA" "$SHA"
+          git push --force origin dev
+
+          # AND START THE BUILD.  Pushing the tag is not enough: GitHub will not
+          # let a push made with the default GITHUB_TOKEN trigger another
+          # workflow, which is how it stops a workflow feeding itself for ever.
+          # The tag lands, release.yml never wakes up, and the only symptom is a
+          # tag with no release against it.
+          gh workflow run release.yml --ref dev
+          echo "moved dev to $SHA and dispatched release.yml on it."
+          echo "### nightly: \`dev\` now at \`$(git rev-parse --short=7 "$SHA")\`, build started" >> "$GITHUB_STEP_SUMMARY"
