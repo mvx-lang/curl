@@ -32,6 +32,7 @@ jobs:
       - uses: mvx-lang/mvx/.github/actions/publish-source@main
         with:
           package: mvx-lang/curl
+          artifact: curl
           title: curl
           body: "HTTP client for UniData via curl (HTTPGET, HTTPGETFILE). Source + udt seam; indexed by the package registry."
 
@@ -46,6 +47,7 @@ jobs:
       - uses: mvx-lang/mv-package-registry/.github/actions/udt-build@main
         with:
           package: mvx-lang/curl
+          artifact: curl
 
   # ---- what kind of release is this? ----------------------------------------
   # LAST, because it is correcting the publish steps rather than joining them.
