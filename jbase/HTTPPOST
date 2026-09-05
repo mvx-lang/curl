@@ -1,0 +1,14 @@
+      FUNCTION HTTPPOST(URL, CTYPE, BODY, TARGET)
+* mvx-lang/curl — POST BODY to URL via libcurl through jBASE DEFC (JBCURLPOST),
+* writing the response to TARGET and returning the HTTP status (-1 transport
+* error, -2 cannot open TARGET).  TLS, redirects and the Content-Type header are
+* libcurl's.  GPL-2.0-only.
+*
+* TARGET, not PATH: jBASE reserves a long list of ordinary words, and a reserved
+* name as a parameter fails at compile time with an error that names the line
+* rather than the word.
+      DEFC VAR JBCURLPOST(VAR, VAR, VAR, VAR)
+      CT = TRIM(CTYPE)
+      IF CT = "" THEN CT = "application/json"
+      RC = JBCURLPOST(URL, CT, BODY, TARGET)
+      RETURN(RC)

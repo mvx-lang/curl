@@ -1,2 +1,3 @@
 CURLGET:string:1:string
 CURLGETFILE:string:2:string,string
+CURLPOST:string:4:string,string,string,string
