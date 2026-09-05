@@ -10,8 +10,21 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 CC="${CC:-cc}"
 mkdir -p "$STAGE/BP" "$STAGE/udt-callc"
 "$CC" -m64 -fPIC -O2 -DMVXCURL_UDT -c "$SRC/src/mvxcurl.c" -o "$STAGE/udt-callc/curlcallcb.o"
-cp "$SRC/udt/HTTPGET"     "$STAGE/BP/HTTPGET"
-cp "$SRC/udt/HTTPGETFILE" "$STAGE/BP/HTTPGETFILE"
+# Derived from the directory, never a hardcoded list: a hardcoded one silently
+# drops a newly added program, which is how CMD.FLAG went missing from a cmd
+# release and HTTPPOST would have gone missing from this one.  Compiled objects
+# ($<PROG> on jBASE, _<PROG> on UniData) are skipped -- they are output, not
+# programs -- and every staged source gets a trailing newline, which UniVerse's
+# compiler requires and the others do not mind.
+for f in "$SRC"/udt/*; do
+   [ -f "$f" ] || continue
+   case "$(basename "$f")" in (_*|\$*|.*) continue ;; esac
+   cp "$f" "$STAGE/BP/"
+done
+for f in "$STAGE"/BP/*; do
+   [ -f "$f" ] || continue
+   [ -n "$(tail -c 1 "$f")" ] && printf '\n' >> "$f"
+done
 cp "$SRC/udt-callc/funcs" "$SRC/udt-callc/libs" "$STAGE/udt-callc/"
 cp "$SRC/PKG" "$SRC/mvpkg.json" "$SRC/LICENSE" "$STAGE/" 2>/dev/null || true
 echo "build-udt: staged the curl udt package (CallC libcurl)"

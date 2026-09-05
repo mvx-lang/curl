@@ -83,6 +83,49 @@ static long http_get_file(const char *url, const char *path) {
     return rc == CURLE_OK ? code : -1;
 }
 
+/* POST body (bodylen bytes, binary-safe) to url with Content-Type ctype, the
+   response written to path.  Returns the HTTP status, -1 on a transport error,
+   -2 if path cannot be opened.
+
+   THE RESPONSE GOES TO A FILE, matching HTTPPOST in the curl-cmd transport, so
+   the two providers of the virtual `curl` have one contract.  It also keeps the
+   awkward binding out of this: a response returned by value would have to come
+   back through CallC's single char*, which cannot also carry a status. */
+static long http_post_file(const char *url, const char *ctype,
+                           const char *body, size_t bodylen, const char *path) {
+    FILE *f = fopen(path, "wb");
+    if (!f) return -2;
+    CURL *c = curl_easy_init();
+    if (!c) { fclose(f); return -1; }
+    struct curl_slist *hdrs = NULL;
+    char ch[256];
+    snprintf(ch, sizeof ch, "Content-Type: %s",
+             (ctype && *ctype) ? ctype : "application/json");
+    hdrs = curl_slist_append(hdrs, ch);
+    /* Expect: 100-continue makes libcurl wait a second before sending a body of
+       any size, and a registry that does not answer it turns every POST into a
+       stall.  An empty header removes it. */
+    hdrs = curl_slist_append(hdrs, "Expect:");
+    curl_common(c, url);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT, 120L);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    /* COPYPOSTFIELDS, not POSTFIELDS: libcurl does not take a copy for the
+       latter, so the caller's buffer would have to outlive the transfer.  And
+       the SIZE is set explicitly, so a body containing a NUL is sent whole
+       rather than truncated at it. */
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)bodylen);
+    curl_easy_setopt(c, CURLOPT_COPYPOSTFIELDS, body ? body : "");
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, f);        /* default fwrite callback */
+    CURLcode rc = curl_easy_perform(c);
+    long code = 0;
+    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(c);
+    fclose(f);
+    return rc == CURLE_OK ? code : -1;
+}
+
 #ifdef MVXCURL_UDT
 /* ---- UniData CallC binding -----------------------------------------------
    CallC marshals string arguments and the return value with strlen, so return
@@ -101,6 +144,16 @@ char *CURLGET(char *url) {
 char *CURLGETFILE(char *url, char *path) {
     static char code[24];
     snprintf(code, sizeof code, "%ld", http_get_file(url, path));
+    return code;
+}
+
+/* CallC marshals strings with strlen, so a body containing a NUL cannot reach
+   here whole -- the length is strlen's answer, and that is the contract this
+   binding has.  Callers on UniData send text (JSON), which has no NULs. */
+char *CURLPOST(char *url, char *ctype, char *body, char *path) {
+    static char code[24];
+    snprintf(code, sizeof code, "%ld",
+             http_post_file(url, ctype, body, body ? strlen(body) : 0, path));
     return code;
 }
 #elif defined(MVXCURL_JBASE)
@@ -159,6 +212,17 @@ VAR *JBCURLGETFILE(VAR *Result, JBASEDP VAR *A0, VAR *A1) {
     return Result;
 }
 
+/* POST: url, content type, body, response path.  CONV_SFB gives a C string, so
+   as on the CallC arm the body is text and ends at the first NUL; that is the
+   same limit every BASIC caller already lives with. */
+VAR *JBCURLPOST(VAR *Result, JBASEDP VAR *A0, VAR *A1, VAR *A2, VAR *A3) {
+    const char *body = jb_sfb(dp, A2);
+    long code = http_post_file(jb_sfb(dp, A0), jb_sfb(dp, A1),
+                               body, strlen(body), jb_sfb(dp, A3));
+    STORE_VBI(Result, code);
+    return Result;
+}
+
 #else
 /* ---- MVX mvx_ext binding -------------------------------------------------- */
 #include "mvx_ext.h"
@@ -193,11 +257,28 @@ static void ext_httpgetfile(mvx_ctx *ctx, mv_value *ret, int32_t argc, mv_value 
     mv_set_str(ret, num, (int64_t)strlen(num));
 }
 
+static void ext_httppost(mvx_ctx *ctx, mv_value *ret, int32_t argc, mv_value **argv) {
+    (void)ctx; (void)argc;
+    char url[2048], ctype[256], path[2048], num[24];
+    arg_str(argv[0], url, sizeof url);
+    arg_str(argv[1], ctype, sizeof ctype);
+    /* The body is not copied into a fixed buffer: it is the one argument with no
+       sensible ceiling, and mv_val_chars already hands back a pointer and a
+       length.  Everything else here is a name and fits. */
+    char nb[40]; const char *bp;
+    int64_t blen = mv_val_chars(argv[2], nb, sizeof nb, &bp);
+    arg_str(argv[3], path, sizeof path);
+    snprintf(num, sizeof num, "%ld",
+             http_post_file(url, ctype, bp, (size_t)blen, path));
+    mv_set_str(ret, num, (int64_t)strlen(num));
+}
+
 static const mvx_extfn curl_fns[] = {
     {"HTTPGET", 1, 1, ext_httpget},
     {"HTTPGETFILE", 2, 2, ext_httpgetfile},
+    {"HTTPPOST", 4, 4, ext_httppost},
 };
-static const mvx_ext curl_ext = {"curl", 2, curl_fns};
+static const mvx_ext curl_ext = {"curl", 3, curl_fns};
 
 const mvx_ext *mvx_ext_entry(int abi) {
     return abi == MVX_EXT_ABI ? &curl_ext : NULL;

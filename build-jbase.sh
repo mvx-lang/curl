@@ -16,6 +16,26 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 CC="${CC:-cc}"
 ACCT="$STAGE/curl"
 
+# THE BUILDER IMAGE DOES NOT CARRY curl.h.  The udt builder does, so build-udt.sh
+# can assume it; the jBASE image is built by hand on the runner from media that
+# cannot be shipped, and there is no Dockerfile in git to add it to.  So the
+# package brings its own build dependency rather than requiring an undocumented
+# change to a hand-built image -- which would also be lost the next time that
+# image is rebuilt.
+#
+# dnf's post-install scriptlet FAILS NOISILY here and does not matter: ldconfig
+# trips over jBASE's own /opt/jbase/*/lib/libjrest.so.el, which is not an ELF
+# file.  Thirteen complaints, exit 0, header installed.  Test for the header
+# rather than trusting the exit status, so a real failure is still caught.
+if [ ! -f /usr/include/curl/curl.h ]; then
+   echo "build-jbase: curl.h absent — installing libcurl-devel"
+   dnf -y install libcurl-devel >/dev/null 2>&1 || true
+fi
+[ -f /usr/include/curl/curl.h ] || {
+   echo "build-jbase: curl.h still absent after installing libcurl-devel" >&2
+   exit 1
+}
+
 mkdir -p "$ACCT/BP" "$ACCT/lib"
 
 # -std=c11 is STRICT about POSIX: without _POSIX_C_SOURCE the jBASE headers pull
@@ -30,7 +50,21 @@ mkdir -p "$ACCT/BP" "$ACCT/lib"
       -o "$ACCT/lib/libjbcurl.so"
 echo "build-jbase: built lib/libjbcurl.so (JBCURLGET/JBCURLGETFILE)"
 
-cp "$SRC/jbase/HTTPGET" "$SRC/jbase/HTTPGETFILE" "$ACCT/BP/"
+# Derived from the directory, never a hardcoded list: a hardcoded one silently
+# drops a newly added program, which is how CMD.FLAG went missing from a cmd
+# release and HTTPPOST would have gone missing from this one.  Compiled objects
+# ($<PROG> on jBASE, _<PROG> on UniData) are skipped -- they are output, not
+# programs -- and every staged source gets a trailing newline, which UniVerse's
+# compiler requires and the others do not mind.
+for f in "$SRC"/jbase/*; do
+   [ -f "$f" ] || continue
+   case "$(basename "$f")" in (_*|\$*|.*) continue ;; esac
+   cp "$f" "$ACCT/BP/"
+done
+for f in "$ACCT"/BP/*; do
+   [ -f "$f" ] || continue
+   [ -n "$(tail -c 1 "$f")" ] && printf '\n' >> "$f"
+done
 for f in mvpkg.json PKG LICENSE README.md; do
    if [ -f "$SRC/$f" ]; then cp "$SRC/$f" "$ACCT/"; fi
 done
