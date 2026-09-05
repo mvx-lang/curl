@@ -2,11 +2,13 @@
  * curl — HTTP client for MultiValue BASIC via libcurl.
  * Copyright (C) 2026 Gordon Heydon.  SPDX-License-Identifier: GPL-2.0-only
  *
- * One libcurl core, two bindings:
- *   MVX  — the mvx_ext ABI (HTTPGET/HTTPGETFILE), built into LIB/.
- *   udt  — UniData CallC (CURLGET/CURLGETFILE), folded into libu2callc.so
- *          (compile with -DMVXCURL_UDT); the BASIC HTTPGET/HTTPGETFILE verbs
- *          CALLC these.
+ * One libcurl core, three bindings:
+ *   MVX   — the mvx_ext ABI (HTTPGET/HTTPGETFILE), built into LIB/.
+ *   udt   — UniData CallC (CURLGET/CURLGETFILE), folded into libu2callc.so
+ *           (compile with -DMVXCURL_UDT); the BASIC HTTPGET/HTTPGETFILE verbs
+ *           CALLC these.
+ *   jbase — jBASE DEFC (JBCURLGET/JBCURLGETFILE) in a shared library
+ *           (-DMVXCURL_JBASE -shared); the BASIC verbs DEFC these.
  *
  * libcurl handles TLS (HTTPS), redirects (a github release URL 302s to the CDN),
  * and binary bodies — the things UniData's native HTTP client and a raw-socket
@@ -101,6 +103,62 @@ char *CURLGETFILE(char *url, char *path) {
     snprintf(code, sizeof code, "%ld", http_get_file(url, path));
     return code;
 }
+#elif defined(MVXCURL_JBASE)
+/* ---- jBASE DEFC binding ---------------------------------------------------
+   jBASE reaches C with DEFC, which declares a FUNCTION rather than a subroutine
+   and hands it the session:
+
+       DEFC VAR JBCURLGET(VAR, VAR)
+       ST = JBCURLGET(URL, BODY)
+
+   An argument VAR written by the C side IS visible to the caller, so the body
+   travels back through an ARGUMENT and the return value carries the HTTP status.
+   That is better than the CallC arm above can manage: CallC marshals a char* and
+   nothing else, so CURLGET has to answer the body itself and the status is lost
+   -- a 404 and an empty 200 are the same empty string there.  Here they are not.
+
+   The entry points are named JBCURL* rather than CURL* so the BASIC wrappers can
+   keep the names HTTPGET/HTTPGETFILE that every caller already uses: DEFC
+   declares a function, and a function cannot share a name with the BASIC
+   FUNCTION that calls it. */
+#include <jsystem.h>
+
+/* jBASE passes the session as a leading DPSTRUCT* when its headers say so. */
+#ifdef DPSTRUCT_DEF
+#define JBASEDP DPSTRUCT *dp,
+#else
+#define JBASEDP
+#endif
+
+/* A VAR's bytes as a C string, and the reverse.  Both take `dp` BY THAT NAME:
+   CONV_SFB and STORE_VBC are macros that expand to calls passing `dp`
+   implicitly, so a helper whose parameter is called anything else does not
+   compile -- and the error points into jsystem.h rather than at the helper. */
+static const char *jb_sfb(DPSTRUCT *dp, VAR *v) {
+    char *p = v ? (char *)CONV_SFB(v) : NULL;
+    return p ? p : "";
+}
+
+VAR *JBCURLGET(VAR *Result, JBASEDP VAR *A0, VAR *Out) {
+    char *body = NULL;
+    size_t n = 0;
+    long code = http_get_buf(jb_sfb(dp, A0), &body, &n);
+    /* Same contract as every other arm: a body only on 2xx, "" otherwise -- so a
+       404's error page never reads as content.  The status is the return value,
+       which is the part the other arms cannot give back. */
+    if (code < 200 || code >= 300) { free(body); body = NULL; }
+    STORE_VBC(Out, body ? body : "");
+    free(body);
+    STORE_VBI(Result, code);
+    return Result;
+}
+
+VAR *JBCURLGETFILE(VAR *Result, JBASEDP VAR *A0, VAR *A1) {
+    long code = http_get_file(jb_sfb(dp, A0), jb_sfb(dp, A1));
+    STORE_VBI(Result, code);
+    return Result;
+}
+
 #else
 /* ---- MVX mvx_ext binding -------------------------------------------------- */
 #include "mvx_ext.h"

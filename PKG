@@ -1,5 +1,5 @@
 curl
 1.1
 HTTP client for UniData via curl (HTTPGET, HTTPGETFILE)
-mvx udt
+udt jbase
 +mvpkg
