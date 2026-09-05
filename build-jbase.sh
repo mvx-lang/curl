@@ -50,7 +50,21 @@ mkdir -p "$ACCT/BP" "$ACCT/lib"
       -o "$ACCT/lib/libjbcurl.so"
 echo "build-jbase: built lib/libjbcurl.so (JBCURLGET/JBCURLGETFILE)"
 
-cp "$SRC/jbase/HTTPGET" "$SRC/jbase/HTTPGETFILE" "$ACCT/BP/"
+# Derived from the directory, never a hardcoded list: a hardcoded one silently
+# drops a newly added program, which is how CMD.FLAG went missing from a cmd
+# release and HTTPPOST would have gone missing from this one.  Compiled objects
+# ($<PROG> on jBASE, _<PROG> on UniData) are skipped -- they are output, not
+# programs -- and every staged source gets a trailing newline, which UniVerse's
+# compiler requires and the others do not mind.
+for f in "$SRC"/jbase/*; do
+   [ -f "$f" ] || continue
+   case "$(basename "$f")" in (_*|\$*|.*) continue ;; esac
+   cp "$f" "$ACCT/BP/"
+done
+for f in "$ACCT"/BP/*; do
+   [ -f "$f" ] || continue
+   [ -n "$(tail -c 1 "$f")" ] && printf '\n' >> "$f"
+done
 for f in mvpkg.json PKG LICENSE README.md; do
    if [ -f "$SRC/$f" ]; then cp "$SRC/$f" "$ACCT/"; fi
 done

@@ -1,0 +1,15 @@
+      FUNCTION HTTPPOST(URL, CTYPE, BODY, RESPFILE)
+* mvx-lang/curl — POST BODY to URL via libcurl through CallC (CURLPOST),
+* writing the response to RESPFILE and returning the HTTP status (-1 transport
+* error, -2 cannot open RESPFILE).  TLS, redirects and the Content-Type header
+* are libcurl's.  GPL-2.0-only.
+*
+* The response goes to a FILE rather than coming back by value because CallC
+* marshals a single char* and it is already carrying the status: a body returned
+* here would leave no way to say 404.  Same contract as HTTPPOST in curl-cmd, so
+* both providers of the virtual "curl" answer alike.
+      PERFORM "UDT.OPTIONS 88 ON"        ;* enable CallC
+      CT = TRIM(CTYPE)
+      IF CT = "" THEN CT = "application/json"
+      CODE = CALLC CURLPOST(URL, CT, BODY, RESPFILE)
+      RETURN CODE + 0
