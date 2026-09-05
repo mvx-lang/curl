@@ -61,8 +61,22 @@ jobs:
   #
   # Both directions are set explicitly, for the same reason: leaving the stable
   # case alone means it keeps whatever that race happened to leave behind.
+  # ---- jbase: the DEFC shared library, built in the licensed container --------
+  # jBASE resolves DEFC against a SHARED LIBRARY, where UniData folds its CallC
+  # contribution in as an object -- so this links libjbcurl.so against libcurl and
+  # jBASE's own headers, and the artifact is os/arch-locked like any native build.
+  jbase-binary:
+    needs: [source]
+    runs-on: [self-hosted, linux, jbase]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: mvx-lang/mv-package-registry/.github/actions/jbase-build@main
+        with:
+          package: mvx-lang/curl
+          artifact: curl
+
   mark:
-    needs: [source, udt-binary]
+    needs: [source, udt-binary, jbase-binary]
     runs-on: ubuntu-latest
     steps:
       - name: Say what this release is

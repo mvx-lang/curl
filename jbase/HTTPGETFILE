@@ -1,0 +1,12 @@
+FUNCTION HTTPGETFILE(URL, TARGET)
+* mvx-lang/curl — download URL to TARGET via libcurl through jBASE DEFC
+* (JBCURLGETFILE), returning the HTTP status (-1 transport error, -2 cannot open
+* TARGET).  Redirect and binary handling are libcurl's; a GitHub release URL 302s
+* to the CDN.  GPL-2.0-only.
+*
+* TARGET, not PATH: jBASE reserves a long list of ordinary words, and a reserved
+* name as a parameter fails at compile time with an error that names the line
+* rather than the word.
+   DEFC VAR JBCURLGETFILE(VAR, VAR)
+   RC = JBCURLGETFILE(URL, TARGET)
+   RETURN(RC)
