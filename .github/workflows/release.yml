@@ -40,7 +40,16 @@ jobs:
   # linked against libcurl into libu2callc.so), so the object must be compiled on
   # the target's Rocky 8 — build it in the licensed udt-builder container (which
   # ships libcurl-devel) via the shared udt-build action, exactly like git.
+  # needs: [source] — NOT for ordering, but so this job never CREATES the release.
+  # Every publish step creates it as a side effect of uploading, so jobs starting
+  # together each try to create it: one wins and the losers fail finalize with
+  # `Validation Failed: {"code":"already_exists","field":"tag_name"}`, leaving a
+  # stray draft release behind for the tag.  That is where the duplicate draft
+  # beside every tag comes from, and on mv_package#66 it went further — the job
+  # it killed was `source`, which other jobs need, so the release shipped with
+  # half its artifacts.  `source` alone creates it; the rest upload into it.
   udt-binary:
+    needs: [source]
     runs-on: [self-hosted, linux, udt]
     steps:
       - uses: actions/checkout@v5
