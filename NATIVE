@@ -1,0 +1,3 @@
+pkgconfig: libcurl
+libs: -lcurl
+src/mvxcurl.c
