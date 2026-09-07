@@ -1,5 +1,5 @@
 curl
 1.3.0
 In-process HTTP for MultiValue BASIC via libcurl (HTTPGET, HTTPPOST, HTTPGETFILE)
-udt jbase
+mvx udt jbase
 +mvpkg
