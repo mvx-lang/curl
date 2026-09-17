@@ -5,6 +5,7 @@
   "description": "In-process HTTP for MultiValue BASIC via libcurl (HTTPGET, HTTPPOST, HTTPGETFILE) \u2014 the faster alternative to curl-cmd; needs a compiler and the OS libcurl at install",
   "license": "GPL-2.0-only",
   "systems": [
+    "mvx",
     "udt",
     "jbase"
   ],
