@@ -1,8 +1,8 @@
-# Release curl on a version tag: a portable source package plus the udt BASIC
-# HTTP seam (HTTPGET/HTTPGETFILE via curl).  udt-only, pure BASIC — no native
-# build, no container — so it stages + tars on a hosted runner and is
-# os/arch-independent (udt-any-any-le).  Copyright (C) 2026 Gordon Heydon.
-# GPL-2.0-only.  Tag the bare version, e.g.:  git tag 1.0.0 && git push origin 1.0.0
+# Release curl on a version tag: the source package, plus the libcurl HTTP
+# client (HTTPGET, HTTPGETFILE, HTTPPOST) built for each system that loads it --
+# a UniData CallC object, a jBASE DEFC library, and an mvx native extension.
+# Copyright (C) 2026 Gordon Heydon.  GPL-2.0-only.
+# Tag the bare version, e.g.:  git tag 1.0.0 && git push origin 1.0.0
 name: release
 
 on:
@@ -34,7 +34,7 @@ jobs:
           package: mvx-lang/curl
           artifact: curl
           title: curl
-          body: "HTTP client for UniData via curl (HTTPGET, HTTPGETFILE). Source + udt seam; indexed by the package registry."
+          body: "HTTP client via libcurl (HTTPGET, HTTPGETFILE, HTTPPOST) for mvx, UniData and jBASE. Source + prebuilt binaries; indexed by the package registry."
 
   # The udt side is a native CallC binding (mvxcurl.c -DMVXCURL_UDT -> curlcallcb.o,
   # linked against libcurl into libu2callc.so), so the object must be compiled on
@@ -84,8 +84,116 @@ jobs:
           package: mvx-lang/curl
           artifact: curl
 
+  # ---- mvx: the native extension, one build per architecture ----------------
+  # On MVX this package is a native extension and nothing else: build-mvx.sh
+  # has mkpkg compile src/mvxcurl.c into LIB/libmvxext_curl.so and stages it
+  # with EXPORTS.  It is the toolchain's HTTPS transport -- mvx's own `http`
+  # package has no TLS, so without this MVPKG cannot reach the registry at all
+  # (mvx#218).  Built natively on both architectures mvx publishes; setup-mvx
+  # picks the toolchain by `uname -m', and the asset name uses the same token
+  # the mvx installer asks for.  needs: [source] -- see udt-binary.
+  mvx-binary:
+    needs: [source]
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: curl
+      # mkpkg is not installed with the toolchain (build-mvx.sh says why), and
+      # stamp-manifests.py is how a package states the version it was released as.
+      - name: Check out the mvx package tooling
+        uses: actions/checkout@v5
+        with:
+          repository: mvx-lang/mvx
+          path: .mvx-src
+          sparse-checkout: |
+            scripts
+            .github/actions/publish-source
+          sparse-checkout-cone-mode: false
+      - uses: mvx-lang/mvx/.github/actions/setup-mvx@main
+        with:
+          version: latest
+      - name: Install libcurl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev pkg-config
+      - name: Build + stage the mvx package
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${GITHUB_REF_NAME}"; ARCH="$(uname -m)"; OS="linux"
+          case "$(printf '\1\2' | od -An -tx2 | tr -d ' \n')" in
+            0201*) ENDIAN=le ;; 0102*) ENDIAN=be ;; *) ENDIAN=le ;;
+          esac
+          BASE="curl-$VER-mvx-$OS-$ARCH-$ENDIAN"
+          DIST="$PWD/dist/$BASE"; rm -rf "$DIST"; mkdir -p "$DIST"
+          # mkpkg compiles against <mvx-src>/runtime/include.  Point that at the
+          # INSTALLED toolchain's headers rather than checking out develop's: the
+          # extension must match the runtime it is tested and shipped with, and
+          # a runtime refuses a library stamped with a newer ABI than its own.
+          mkdir -p .mvx-src/runtime
+          ln -sfn "$MVXHOME/include" .mvx-src/runtime/include
+          MVX_SRC="$PWD/.mvx-src" MVXBASIC="$(command -v mvx-basic)" sh curl/build-mvx.sh "$DIST"
+          python3 .mvx-src/.github/actions/publish-source/stamp-manifests.py "$DIST" "$VER"
+
+          # THE POINT OF THIS BUILD IS HTTPS, SO THAT IS WHAT GETS TESTED -- a
+          # library that loads is not a transport that works.  Lay the package
+          # over a copy of the system account, as the mvx installer does, and
+          # make real requests.  mvx's own `http' package leaves the copy
+          # first: it exports HTTPGET too, and a test that could be answered by
+          # the plain-HTTP client is not a test of this one.
+          SMOKE="$(mktemp -d)"
+          cp -a "$MVXHOME/share/mvx/system" "$SMOKE/system"
+          rm -f "$SMOKE"/system/LIB/libmvxext_http.*
+          mkdir -p "$SMOKE/system/LIB" "$SMOKE/u"
+          cp "$DIST"/LIB/* "$SMOKE/system/LIB/"
+          cat "$DIST/EXPORTS" > "$SMOKE/system/EXPORTS"
+          cat > "$SMOKE/u/t.b" <<'BAS'
+          B = HTTPGET("https://packages.mvx-lang.org/search?q=curl")
+          PRINT "get:" : LEN(B) : ":" : INDEX(B, '"packages"', 1)
+          S = HTTPGETFILE("https://packages.mvx-lang.org/packages", "/tmp/curl-smoke-index")
+          PRINT "getfile:" : S
+          P = HTTPPOST("https://packages.mvx-lang.org/webhook/release-smoke", "application/json", "{}", "/tmp/curl-smoke-post")
+          PRINT "post:" : P
+          BAS
+          out="$(cd "$SMOKE/u" && MVXSYSTEM="$SMOKE/system" mvx-basic t.b -o t 2>&1 \
+                 && MVXSYSTEM="$SMOKE/system" MVXACCOUNT=. ./t 2>&1)" || true
+          printf '%s\n' "$out"
+          # a body that mentions "packages"; the index downloaded (200); and a
+          # POST that reached the server and got its real answer (404: there is
+          # no such webhook) -- not -1, which would mean no request was made.
+          get="$(printf '%s\n' "$out" | sed -n 's/^get:\([0-9]*\):\([0-9]*\)$/\1 \2/p')"
+          gf="$(printf '%s\n' "$out" | sed -n 's/^getfile:\(-*[0-9]*\)$/\1/p')"
+          po="$(printf '%s\n' "$out" | sed -n 's/^post:\(-*[0-9]*\)$/\1/p')"
+          set -- $get
+          if [ "${1:-0}" -gt 0 ] && [ "${2:-0}" -gt 0 ] && [ "$gf" = 200 ] && [ "$po" = 404 ]; then
+            echo "smoke: HTTPGET, HTTPGETFILE and HTTPPOST work over HTTPS"
+          else
+            echo "::error::the mvx curl package does not work over HTTPS (get='$get' getfile='$gf' post='$po')"
+            exit 1
+          fi
+          rm -rf "$SMOKE" /tmp/curl-smoke-index /tmp/curl-smoke-post
+
+          tar czf "$BASE.tar.gz" -C "$DIST" .
+          sha256sum "$BASE.tar.gz" > "$BASE.tar.gz.sha256"
+          echo "tarball=$BASE.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=$BASE.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+      - name: Publish the mvx binary asset
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            ${{ steps.pkg.outputs.tarball }}
+            ${{ steps.pkg.outputs.checksum }}
+          fail_on_unmatched_files: true
+
   mark:
-    needs: [source, udt-binary, jbase-binary]
+    needs: [source, udt-binary, jbase-binary, mvx-binary]
     runs-on: ubuntu-latest
     steps:
       - name: Say what this release is
