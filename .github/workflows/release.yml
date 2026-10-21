@@ -139,6 +139,10 @@ jobs:
           mkdir -p .mvx-src/runtime
           ln -sfn "$MVXHOME/include" .mvx-src/runtime/include
           MVX_SRC="$PWD/.mvx-src" MVXBASIC="$(command -v mvx-basic)" sh curl/build-mvx.sh "$DIST"
+          # IN-TREE, BOTH MANIFESTS SAY 0.0.0-dev (#23).  Deliberately -- a
+          # number committed there can only be stale or coincidentally right,
+          # and this step is why it does not have to be either.  Do not bump it
+          # before a release; tag, and the tag lands in the artifact.
           python3 .mvx-src/.github/actions/publish-source/stamp-manifests.py "$DIST" "$VER"
 
           # THE POINT OF THIS BUILD IS HTTPS, SO THAT IS WHAT GETS TESTED -- a
