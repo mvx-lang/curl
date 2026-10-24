@@ -25,7 +25,23 @@ permissions:
   contents: write
 
 jobs:
+  # ci.yml runs this on every push and pull request, but not on a TAG -- and a
+  # tag is the one push where shipping manifests that disagree is permanent.
+  # json, mapfield and curl-cmd each gate their release the same way (#25).
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: The manifests agree with each other
+        run: |
+          set -eu
+          want=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                   mvpkg.json | head -1)
+          [ -n "$want" ] || { echo "::error::mvpkg.json has no version"; exit 1; }
+          sh tests/manifest-version.sh "$want"
+
   source:
+    needs: [manifests]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -145,43 +161,11 @@ jobs:
           # before a release; tag, and the tag lands in the artifact.
           python3 .mvx-src/.github/actions/publish-source/stamp-manifests.py "$DIST" "$VER"
 
-          # THE POINT OF THIS BUILD IS HTTPS, SO THAT IS WHAT GETS TESTED -- a
-          # library that loads is not a transport that works.  Lay the package
-          # over a copy of the system account, as the mvx installer does, and
-          # make real requests.  mvx's own `http' package leaves the copy
-          # first: it exports HTTPGET too, and a test that could be answered by
-          # the plain-HTTP client is not a test of this one.
-          SMOKE="$(mktemp -d)"
-          cp -a "$MVXHOME/share/mvx/system" "$SMOKE/system"
-          rm -f "$SMOKE"/system/LIB/libmvxext_http.*
-          mkdir -p "$SMOKE/system/LIB" "$SMOKE/u"
-          cp "$DIST"/LIB/* "$SMOKE/system/LIB/"
-          cat "$DIST/EXPORTS" > "$SMOKE/system/EXPORTS"
-          cat > "$SMOKE/u/t.b" <<'BAS'
-          B = HTTPGET("https://packages.mvx-lang.org/search?q=curl")
-          PRINT "get:" : LEN(B) : ":" : INDEX(B, '"packages"', 1)
-          S = HTTPGETFILE("https://packages.mvx-lang.org/packages", "/tmp/curl-smoke-index")
-          PRINT "getfile:" : S
-          P = HTTPPOST("https://packages.mvx-lang.org/webhook/release-smoke", "application/json", "{}", "/tmp/curl-smoke-post")
-          PRINT "post:" : P
-          BAS
-          out="$(cd "$SMOKE/u" && MVXSYSTEM="$SMOKE/system" mvx-basic t.b -o t 2>&1 \
-                 && MVXSYSTEM="$SMOKE/system" MVXACCOUNT=. ./t 2>&1)" || true
-          printf '%s\n' "$out"
-          # a body that mentions "packages"; the index downloaded (200); and a
-          # POST that reached the server and got its real answer (404: there is
-          # no such webhook) -- not -1, which would mean no request was made.
-          get="$(printf '%s\n' "$out" | sed -n 's/^get:\([0-9]*\):\([0-9]*\)$/\1 \2/p')"
-          gf="$(printf '%s\n' "$out" | sed -n 's/^getfile:\(-*[0-9]*\)$/\1/p')"
-          po="$(printf '%s\n' "$out" | sed -n 's/^post:\(-*[0-9]*\)$/\1/p')"
-          set -- $get
-          if [ "${1:-0}" -gt 0 ] && [ "${2:-0}" -gt 0 ] && [ "$gf" = 200 ] && [ "$po" = 404 ]; then
-            echo "smoke: HTTPGET, HTTPGETFILE and HTTPPOST work over HTTPS"
-          else
-            echo "::error::the mvx curl package does not work over HTTPS (get='$get' getfile='$gf' post='$po')"
-            exit 1
-          fi
-          rm -rf "$SMOKE" /tmp/curl-smoke-index /tmp/curl-smoke-post
+          # THE ONE REAL TEST THIS PACKAGE HAS, and it used to live here as a step
+          # -- so a tag was the only thing that ever exercised HTTPS, and a pull
+          # request was checked by nothing (#25).  It is tests/https-smoke.sh now,
+          # called from ci.yml as well.  One script, two callers, no drift.
+          sh curl/tests/https-smoke.sh "$DIST"
 
           tar czf "$BASE.tar.gz" -C "$DIST" .
           sha256sum "$BASE.tar.gz" > "$BASE.tar.gz.sha256"

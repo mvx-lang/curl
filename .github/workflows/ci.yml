@@ -1,0 +1,194 @@
+# curl — what can be checked without a licensed MV system, on every push and PR.
+# Copyright (C) 2026 Gordon Heydon.  GPL-2.0-only (see LICENSE).
+#
+# WHY THIS EXISTS (#25).  There was no ci.yml at all: nightly.yml runs on a
+# schedule and release.yml on a tag, so a pull request here was checked by
+# nothing.  It was demonstrated rather than supposed -- the manifest change in
+# #23 merged with zero checks, while the identical change in json ran five and
+# in mapfield eight.
+#
+# AND THE REAL TEST WAS ALREADY WRITTEN.  release.yml built the mvx extension
+# and made real HTTPS requests with it, asserting a body, a 200 and a 404 --
+# the one test this package has, reachable on a GitHub-hosted runner with no
+# licence and no self-hosted anything.  It ran on a tag and nowhere else.  It
+# is tests/https-smoke.sh now, and the `mvx` job below runs it on every push.
+#
+# WHAT STILL NEEDS A LICENCE.  The udt and jbase arms ship native objects
+# (mvxcurl.c with -DMVXCURL_UDT and -DMVXCURL_JBASE) that are loaded by
+# UniData's CallC and jBASE's DEFC.  Exercising those needs the licensed
+# runners release.yml uses.  What is checkable here is the half that does not:
+# the udt object COMPILES and its package stages, both done by running
+# build-udt.sh for real rather than syntax-checking the source.  The jbase
+# variant cannot even be compiled here -- it includes <jsystem.h>, which only
+# a jBASE install has -- so it is the one arm nothing below touches.
+name: ci
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- the things a plain ubuntu runner can answer ----------------------------
+  source:
+    name: source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # THE MANIFESTS MUST AGREE WITH EACH OTHER, which is checkable without a
+      # tag.  Handing manifest-version.sh the version out of mvpkg.json asserts
+      # agreement rather than anything about a release: the tag is stamped into
+      # every staged artifact (mvx#363), so both files say 0.0.0-dev in the
+      # tree and there is nothing to keep in step by hand.
+      - name: The manifests agree with each other
+        run: |
+          set -eu
+          want=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+                   mvpkg.json | head -1)
+          [ -n "$want" ] || { echo "::error::mvpkg.json has no version"; exit 1; }
+          echo "mvpkg.json declares $want -- checking PKG against it"
+          sh tests/manifest-version.sh "$want"
+
+      # The five shell scripts are the only executable code here that is not
+      # BASIC or C, and three of them stage every published artifact.
+      - name: Lint the shell
+        run: |
+          set -eu
+          n=0
+          for f in build-mvx.sh build-udt.sh build-jbase.sh \
+                   tests/manifest-version.sh tests/https-smoke.sh; do
+            [ -f "$f" ] || { echo "::error::$f is missing"; exit 1; }
+            n=$((n + 1))
+          done
+          # A COUNT, because the loop above is a hardcoded list and a new
+          # script added without a line here would be linted by nothing --
+          # which is the same silence this whole workflow exists to end.
+          found=$(find . -name '*.sh' -not -path './.git/*' | wc -l)
+          [ "$found" -eq "$n" ] || {
+            echo "::error::$found .sh files in the tree, $n in the list above"
+            find . -name '*.sh' -not -path './.git/*' | sed 's/^/  /'
+            exit 1; }
+          echo "shellchecking $n scripts"
+          shellcheck -S warning build-mvx.sh build-udt.sh build-jbase.sh \
+                                tests/manifest-version.sh tests/https-smoke.sh
+
+      - name: Install libcurl headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
+
+      # BUILD IT, DO NOT SYNTAX-CHECK IT.  `cc -fsyntax-only` would tell us
+      # mvxcurl.c parses; running build-udt.sh tells us the object links the
+      # CallC entry points AND that the staging still picks up every program.
+      # That second half is not hypothetical: a hardcoded program list is how
+      # CMD.FLAG went missing from a cmd release, which is why this script
+      # derives its list from the directory -- and nothing checked that it
+      # still does.
+      - name: The udt object compiles and its package stages
+        run: |
+          set -eu
+          out=$(mktemp -d)
+          sh build-udt.sh "$out"
+          for f in udt-callc/curlcallcb.o udt-callc/funcs udt-callc/libs \
+                   BP/HTTPGET BP/HTTPGETFILE BP/HTTPPOST PKG mvpkg.json LICENSE; do
+            [ -s "$out/$f" ] || { echo "::error::build-udt.sh staged no $f"; exit 1; }
+          done
+          # EVERY BASIC PROGRAM IN udt/, not just the three named above, so
+          # adding a fourth cannot silently fail to ship.
+          for f in udt/*; do
+            b=${f#udt/}
+            [ -f "$out/BP/$b" ] || { echo "::error::udt/$b was not staged"; exit 1; }
+          done
+          echo "staged $(find "$out" -type f | wc -l) files, object $(wc -c < "$out/udt-callc/curlcallcb.o") bytes"
+
+  # ---- the arm that needs no licence, tested for real -------------------------
+  # Both architectures, because this is a native extension: the thing being
+  # built is machine code, and an arm64 build that does not load is not a
+  # hypothetical failure mode for a package whose only job is to load.
+  mvx:
+    name: mvx
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: curl
+
+      # mkpkg does the compiling and is NOT installed with the toolchain --
+      # `cmake --install` ships bin/, lib/, include/ and the system account,
+      # not scripts/ -- so build-mvx.sh needs an mvx checkout to point at.
+      # Same as release.yml, minus publish-source: nothing is stamped here.
+      - name: Check out the mvx package tooling
+        uses: actions/checkout@v5
+        with:
+          repository: mvx-lang/mvx
+          path: .mvx-src
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+      - uses: mvx-lang/mvx/.github/actions/setup-mvx@main
+        with:
+          version: latest
+      - name: Install libcurl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev pkg-config
+
+      - name: Build the extension and prove it speaks HTTPS
+        run: |
+          set -eu
+          DIST="$PWD/dist"; rm -rf "$DIST"; mkdir -p "$DIST"
+          # mkpkg compiles against <mvx-src>/runtime/include.  Point that at
+          # the INSTALLED toolchain's headers rather than develop's: the
+          # extension must match the runtime it is tested with, and a runtime
+          # refuses a library stamped with a newer ABI than its own.
+          mkdir -p .mvx-src/runtime
+          ln -sfn "$MVXHOME/include" .mvx-src/runtime/include
+          MVX_SRC="$PWD/.mvx-src" MVXBASIC="$(command -v mvx-basic)" \
+            sh curl/build-mvx.sh "$DIST"
+          sh curl/tests/https-smoke.sh "$DIST"
+
+  # ---- the workflows themselves, statically -----------------------------------
+  # Ported from json's, which was ported from mvx's: it carries the two things
+  # about actionlint that are easy to get wrong.  Worth having here on its own
+  # evidence -- release.yml is 200 lines with a `run:` block that resolves a
+  # tag, stages a package and asserts an HTTPS round trip, and nothing has ever
+  # looked at that shell.
+  lint-workflows:
+    name: lint-workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # SHELLCHECK MUST BE HERE, AND actionlint WILL NOT SAY SO.  It runs the
+      # shell checks only when shellcheck is on PATH and is silent when it is
+      # absent -- it simply checks less, and the job passes having checked
+      # nothing.  GitHub's images ship it, so this is about noticing the day
+      # one stops.
+      - name: "shellcheck is present, so the shell in run: blocks is checked too"
+        run: |
+          set -eu
+          command -v shellcheck >/dev/null || {
+            echo "::error::no shellcheck on PATH -- actionlint would skip every"
+            echo "::error::run: block silently.  Install it in this job."
+            exit 1
+          }
+          shellcheck --version | sed -n '2p'
+
+      # PINNED, not @latest: a linter that changes under us turns an unrelated
+      # push red.  `go install` at a tag also gets module checksum verification
+      # from the Go checksum database, which a curl|sh installer does not.
+      - name: Lint every workflow
+        env:
+          ACTIONLINT_VERSION: v1.7.12
+        run: |
+          set -eu
+          go install "github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION"
+          "$(go env GOPATH)/bin/actionlint" -color
