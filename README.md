@@ -26,15 +26,27 @@ does. Its own source says it is superseded where TLS is needed.
 
 That is what this package is for on mvx. Nothing refuses the pair, though:
 `install-pkgs.sh` concatenates each package's `EXPORTS` into the aggregate the
-compiler reads, with no check for a name appearing twice. Install both and the
-aggregate declares `HTTPGET` twice — and `mvx-basic` compiles a program against
-that without a word, which is measured rather than supposed. Which of the two
-libraries then answers is not documented anywhere, and a caller has no way to
-ask for one.
+compiler reads, with no check for a name appearing twice, and `mvx-basic`
+compiles against an aggregate declaring `HTTPGET` twice without a word.
+
+**Which library then answers is decided by the filename order in `LIB/`** —
+measured, by laying both into one system account and asking for an `https://`
+URL, which only libcurl can serve:
+
+| `LIB/` holds | `HTTPGET("https://…")` | answered by |
+|---|---|---|
+| `libmvxext_curl` only | 577 bytes | this package |
+| `libmvxext_http` only | 0 | mvx's, which rejects a non-`http` scheme |
+| both | 577 bytes | this package |
+| both, with curl's renamed `libmvxext_zzcurl` | 0 | mvx's |
+
+The order the two appear in the aggregate `EXPORTS` makes no difference; the
+spelling of the library filename does. So `curl` currently wins because `c`
+sorts before `h`, which is luck rather than design — see mvx#365.
 
 That is why `tests/https-smoke.sh` deletes `libmvxext_http.*` from its copy of
-the system account instead of trusting resolution order: a request answered by
-the plain-HTTP client is not a test of this one.
+the system account instead of relying on that: a request answered by the
+plain-HTTP client is not a test of this one.
 
 ## jBASE needs the library preloaded
 
