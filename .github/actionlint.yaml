@@ -1,0 +1,21 @@
+# curl — actionlint configuration.
+# Copyright (C) 2026 Gordon Heydon.  GPL-2.0-only (see LICENSE).
+#
+# THE SELF-HOSTED LABELS HAVE TO BE DECLARED HERE or actionlint reports every
+# one of them as an error and the job can never pass:
+#
+#   label "udt" is unknown. available labels are "windows-latest", ...
+#     if it is a custom label for self-hosted runner, set list of labels in
+#     actionlint.yaml config file
+#
+# release.yml selects two of them with `runs-on: [self-hosted, linux, <sys>]`.
+# `uv` is listed although this package has no uv arm, so the file matches the
+# org's other packages and adding an arm does not also need a lint fix.  Keep
+# the list in step with the runners actually registered on the org -- a label
+# here that no runner carries makes a job queue for ever rather than fail,
+# which actionlint cannot tell you about.
+self-hosted-runner:
+  labels:
+    - udt
+    - uv
+    - jbase
